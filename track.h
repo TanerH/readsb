@@ -70,6 +70,8 @@
 /* Special value for Rc unknown */
 #define RC_UNKNOWN 0
 
+#define ALTITUDE_BARO_RELIABLE_MAX 20
+
 // data moves through three states:
 //  fresh: data is valid. Updates from a less reliable source are not accepted.
 //  stale: data is valid. Updates from a less reliable source are accepted.
@@ -99,6 +101,7 @@ struct aircraft
   long messages; // Number of Mode S messages received
   int signalNext; // next index of signalLevel to use
   int altitude_baro; // Altitude (Baro)
+  int altitude_baro_reliable;
   int altitude_geom; // Altitude (Geometric)
   int geom_delta; // Difference between Geometric and Baro altitudes
   int baro_rate; // Vertical rate (barometric)
