@@ -389,7 +389,8 @@ static void backgroundTasks(void) {
         next_json = now + Modes.json_interval;
     }
 
-    if (now >= next_history) {
+	// disable history
+    if (0 && now >= next_history) {
         int rewrite_receiver_json = (Modes.json_dir && Modes.json_aircraft_history[HISTORY_SIZE - 1].content == NULL);
 
         free(Modes.json_aircraft_history[Modes.json_aircraft_history_next].content); // might be NULL, that's OK.
