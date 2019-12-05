@@ -2575,25 +2575,29 @@ void writeJsonToNet(struct net_writer *writer, char * (*generator) (const char *
     int written = 0;
     char *content;
     char *pos;
-    int bytes = MODES_OUT_BUF_SIZE - 500;
-    content = generator(NULL, &len);
+    int bytes = MODES_OUT_BUF_SIZE - 256;
 
+    char *p = prepareWrite(writer, bytes);
+    if (!p)
+        return;
+
+    content = generator(NULL, &len);
     pos = content;
 
-    while (written < len) {
+    while (p && written < len) {
         if (bytes > len - written) {
             bytes = len - written;
         }
-        char *p = prepareWrite(writer, bytes);
-        if (!p)
-            break;
         memcpy(p, pos, bytes);
         p += bytes;
         pos += bytes;
         written += bytes;
         completeWrite(writer, p);
+
+        p = prepareWrite(writer, bytes);
     }
 
+    flushWrites(writer);
     free(content);
 }
 
