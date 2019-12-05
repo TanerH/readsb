@@ -141,7 +141,6 @@ static void view1090Init(void) {
 
     // Prepare error correction tables
     modesChecksumInit(Modes.nfix_crc);
-    icaoFilterInit();
     modeACInit();
     interactiveInit();
 }
@@ -251,7 +250,6 @@ int main(int argc, char **argv) {
     // Keep going till the user does something that stops us
     while (!Modes.exit) {
         struct timespec r = { 0, 100 * 1000 * 1000};
-        icaoFilterExpire();
         trackPeriodicUpdate();
         modesNetPeriodicWork();
 

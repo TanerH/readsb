@@ -340,7 +340,7 @@ int scoreModesMessage(unsigned char *msg, int validbits) {
         case 29: // Comm-D (ELM)
         case 30: // Comm-D (ELM)
         case 31: // Comm-D (ELM)
-            return icaoFilterTest(crc) ? 1000 : -1;
+            return icaoFilter(crc) ? 1000 : -1;
 
         case 11: // All-call reply
             iid = crc & 0x7f;
@@ -362,12 +362,12 @@ int scoreModesMessage(unsigned char *msg, int validbits) {
 
             // validate address
             if (iid == 0) {
-                if (icaoFilterTest(addr))
+                if (icaoFilter(addr))
                     return 1600 / (ei->errors + 1);
                 else
                     return 750 / (ei->errors + 1);
             } else {
-                if (icaoFilterTest(addr))
+                if (icaoFilter(addr))
                     return 1000 / (ei->errors + 1);
                 else
                     return -1;
@@ -383,22 +383,15 @@ int scoreModesMessage(unsigned char *msg, int validbits) {
             addr = getbits(msg, 9, 32);
             correct_aa_field(&addr, ei);
 
-            if (icaoFilterTest(addr))
+            if (icaoFilter(addr))
                 return 1800 / (ei->errors + 1);
             else
                 return 1400 / (ei->errors + 1);
 
         case 20: // Comm-B, altitude reply
         case 21: // Comm-B, identity reply
-            if (icaoFilterTest(crc))
+            if (icaoFilter(crc))
                 return 1000; // Address/Parity
-
-#if 0
-            // This doesn't seem useful, as we mistake a lot of CRC errors
-            // for overlay control
-            if (icaoFilterTestFuzzy(crc))
-                return 500; // Data/Parity
-#endif
 
             return -2;
 
@@ -458,7 +451,7 @@ int decodeModesMessage(struct modesMessage *mm, unsigned char *msg) {
             // These message types use Address/Parity, i.e. our CRC syndrome is the sender's ICAO address.
             // We can't tell if the CRC is correct or not as we don't know the correct address.
             // Accept the message if it appears to be from a previously-seen aircraft
-            if (!icaoFilterTest(mm->crc)) {
+            if (!icaoFilter(mm->crc)) {
                 return -1;
             }
             mm->source = SOURCE_MODE_S;
@@ -493,7 +486,7 @@ int decodeModesMessage(struct modesMessage *mm, unsigned char *msg) {
                 // we are conservative here: only accept corrected messages that
                 // match an existing aircraft.
                 addr = getbits(msg, 9, 32);
-                if (!icaoFilterTest(addr)) {
+                if (!icaoFilter(addr)) {
                     return -1;
                 }
             }
@@ -521,7 +514,7 @@ int decodeModesMessage(struct modesMessage *mm, unsigned char *msg) {
 
                 // we are conservative here: only accept corrected messages that
                 // match an existing aircraft.
-                if (addr1 != addr2 && !icaoFilterTest(addr2)) {
+                if (addr1 != addr2 && !icaoFilter(addr2)) {
                     return -1;
                 }
             }
@@ -538,7 +531,7 @@ int decodeModesMessage(struct modesMessage *mm, unsigned char *msg) {
             // the ICAO is right! Ow.
 
             // Try an exact match
-            if (icaoFilterTest(mm->crc)) {
+            if (icaoFilter(mm->crc)) {
                 // OK.
                 mm->source = SOURCE_MODE_S;
                 mm->addr = mm->crc;
@@ -712,17 +705,6 @@ int decodeModesMessage(struct modesMessage *mm, unsigned char *msg) {
             mm->airground = AG_GROUND;
         else
             mm->airground = AG_UNCERTAIN;
-    }
-
-    if (!mm->correctedbits && (mm->msgtype == 17 || (mm->msgtype == 11 && mm->IID == 0))) {
-        // No CRC errors seen, and either it was an DF17 extended squitter
-        // or a DF11 acquisition squitter with II = 0. We probably have the right address.
-
-        // Don't do this for DF18, as a DF18 transmitter doesn't necessarily have a
-        // Mode S transponder.
-
-        // NB this is the only place that adds addresses!
-        icaoFilterAdd(mm->addr);
     }
 
     // MLAT overrides all other sources

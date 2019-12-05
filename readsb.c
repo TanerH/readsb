@@ -232,11 +232,7 @@ static void modesInit(void) {
 
     // Prepare error correction tables
     modesChecksumInit(Modes.nfix_crc);
-    icaoFilterInit();
     modeACInit();
-
-    if (Modes.show_only)
-        icaoFilterAdd(Modes.show_only);
 }
 
 // Set affinity of calling thread to specific core on a multi-core CPU
@@ -322,7 +318,6 @@ static void backgroundTasks(void) {
 
     uint64_t now = mstime();
 
-    icaoFilterExpire();
     trackPeriodicUpdate();
 
     if (Modes.net) {

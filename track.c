@@ -161,6 +161,18 @@ static struct aircraft *trackFindAircraft(uint32_t addr) {
     return (NULL);
 }
 
+int icaoFilter(uint32_t addr) {
+    struct aircraft *a = Modes.aircrafts[addr % AIRCRAFTS_BUCKETS];
+
+    while (a) {
+        if (a->addr == addr) {
+			return (mstime() - a->seen_crc < ICAO_FILTER_TTL);
+		}
+        a = a->next;
+    }
+    return 0;
+}
+
 // Should we accept some new data from the given source?
 // If so, update the validity and return 1
 
@@ -867,10 +879,22 @@ struct aircraft *trackUpdateFromMessage(struct modesMessage *mm) {
 
     // Lookup our aircraft or create a new one
     a = trackFindAircraft(mm->addr);
+
     if (!a) { // If it's a currently unknown aircraft....
         a = trackCreateAircraft(mm); // ., create a new record for it,
         a->next = Modes.aircrafts[mm->addr % AIRCRAFTS_BUCKETS]; // .. and put it at the head of the list
         Modes.aircrafts[mm->addr % AIRCRAFTS_BUCKETS] = a;
+    }
+
+    if (!mm->correctedbits && (mm->msgtype == 17 || (mm->msgtype == 11 && mm->IID == 0))) {
+        // No CRC errors seen, and either it was an DF17 extended squitter
+        // or a DF11 acquisition squitter with II = 0. We probably have the right address.
+
+        // Don't do this for DF18, as a DF18 transmitter doesn't necessarily have a
+        // Mode S transponder.
+
+        // NB this is the only place that adds tracks!
+        a->seen_crc = messageNow();
     }
 
     if (mm->signalLevel > 0) {

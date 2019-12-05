@@ -60,6 +60,8 @@
 /* Maximum age of a tracked aircraft with only 1 message received, in milliseconds */
 #define TRACK_AIRCRAFT_ONEHIT_TTL 60000
 
+#define ICAO_FILTER_TTL 60000
+
 /* Minimum number of repeated Mode A/C replies with a particular Mode A code needed in a
  * 1 second period before accepting that code.
  */
@@ -90,6 +92,7 @@ struct aircraft
   uint32_t addr; // ICAO address
   addrtype_t addrtype; // highest priority address type seen for this aircraft
   uint64_t seen; // Time (millis) at which the last packet was received
+  uint64_t seen_crc; // Time (millis) at which the last reliable packet was received (except DF18)
   uint64_t fatsv_last_emitted; // time (millis) aircraft was last FA emitted
   uint64_t fatsv_last_force_emit; // time (millis) we last emitted only-on-change data
   double signalLevel[8]; // Last 8 Signal Amplitudes
@@ -276,6 +279,7 @@ trackDataAge (const data_validity *v)
  */
 struct modesMessage;
 struct aircraft *trackUpdateFromMessage (struct modesMessage *mm);
+int icaoFilter(uint32_t addr);
 
 /* Call periodically */
 void trackPeriodicUpdate ();
