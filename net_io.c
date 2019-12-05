@@ -295,6 +295,9 @@ void modesInitNet(void) {
     s = serviceInit("Beast TCP output", &Modes.beast_out, send_beast_heartbeat, READ_MODE_BEAST_COMMAND, NULL, handleBeastCommand);
     serviceListen(s, Modes.net_bind_address, Modes.net_output_beast_ports);
 
+    s = serviceInit("VRS json output", &Modes.vrs_out, NULL, READ_MODE_IGNORE, NULL, NULL);
+    serviceListen(s, Modes.net_bind_address, Modes.net_output_vrs_ports);
+
     s = serviceInit("Basestation TCP output", &Modes.sbs_out, send_sbs_heartbeat, READ_MODE_IGNORE, NULL, NULL);
     serviceListen(s, Modes.net_bind_address, Modes.net_output_sbs_ports);
 
@@ -1467,7 +1470,7 @@ static const char *nav_altitude_source_enum_string(nav_altitude_source_t src) {
 char *generateAircraftJson(const char *url_path, int *len) {
     uint64_t now = mstime();
     struct aircraft *a;
-    int buflen = 32768; // The initial buffer is resized as needed
+    int buflen = 2*1024*1024; // The initial buffer is resized as needed
     char *buf = (char *) malloc(buflen), *p = buf, *end = buf + buflen;
     char *line_start;
     int first = 1;
@@ -2565,6 +2568,171 @@ void modesReadSerialClient(void) {
     }
     // Generate FATSV output
     writeFATSV();
+}
+
+void writeJsonToNet(struct net_writer *writer, char * (*generator) (const char *, int*)) {
+    int len = 0;
+    int written = 0;
+    char *content;
+    char *pos;
+    int bytes = MODES_OUT_BUF_SIZE - 500;
+    content = generator(NULL, &len);
+
+    pos = content;
+
+    while (written < len) {
+        if (bytes > len - written) {
+            bytes = len - written;
+        }
+        char *p = prepareWrite(writer, bytes);
+        if (!p)
+            break;
+        memcpy(p, pos, bytes);
+        p += bytes;
+        pos += bytes;
+        written += bytes;
+        completeWrite(writer, p);
+    }
+
+    free(content);
+}
+
+char *generateVRS(const char *url_path, int *len) {
+    uint64_t now = mstime();
+    struct aircraft *a;
+    int buflen = 2*1024*1024; // The initial buffer is resized as needed
+    char *buf = (char *) malloc(buflen), *p = buf, *end = buf + buflen;
+    char *line_start;
+    int first = 1;
+
+    MODES_NOTUSED(url_path);
+
+    _messageNow = now;
+
+    p = safe_snprintf(p, end,
+            "{ \"now\" : %.1f,\n"
+            "  \"messages\" : %u,\n"
+            "  \"aircraft\" : [",
+            now / 1000.0,
+            Modes.stats_current.messages_total + Modes.stats_alltime.messages_total);
+
+    for (int j = 0; j < AIRCRAFTS_BUCKETS; j++) {
+        for (a = Modes.aircrafts[j]; a; a = a->next) {
+            if (a->messages < 2) { // basic filter for bad decodes
+                continue;
+            }
+            if ((now - a->seen) > 90E3) // don't include stale aircraft in the JSON
+                continue;
+
+            if (first)
+                first = 0;
+            else
+                *p++ = ',';
+
+retry:
+            line_start = p;
+            p = safe_snprintf(p, end, "\n    {\"hex\":\"%s%06x\"", (a->addr & MODES_NON_ICAO_ADDRESS) ? "~" : "", a->addr & 0xFFFFFF);
+            if (a->addrtype != ADDR_ADSB_ICAO)
+                p = safe_snprintf(p, end, ",\"type\":\"%s\"", addrtype_enum_string(a->addrtype));
+            if (trackDataValid(&a->callsign_valid))
+                p = safe_snprintf(p, end, ",\"flight\":\"%s\"", jsonEscapeString(a->callsign));
+            if (trackDataValid(&a->airground_valid) && a->airground_valid.source >= SOURCE_MODE_S_CHECKED && a->airground == AG_GROUND)
+                p = safe_snprintf(p, end, ",\"alt_baro\":\"ground\"");
+            else {
+                if (trackDataValid(&a->altitude_baro_valid))
+                    p = safe_snprintf(p, end, ",\"alt_baro\":%d", a->altitude_baro);
+                if (trackDataValid(&a->altitude_geom_valid))
+                    p = safe_snprintf(p, end, ",\"alt_geom\":%d", a->altitude_geom);
+            }
+            if (trackDataValid(&a->gs_valid))
+                p = safe_snprintf(p, end, ",\"gs\":%.1f", a->gs);
+            if (trackDataValid(&a->ias_valid))
+                p = safe_snprintf(p, end, ",\"ias\":%u", a->ias);
+            if (trackDataValid(&a->tas_valid))
+                p = safe_snprintf(p, end, ",\"tas\":%u", a->tas);
+            if (trackDataValid(&a->mach_valid))
+                p = safe_snprintf(p, end, ",\"mach\":%.3f", a->mach);
+            if (trackDataValid(&a->track_valid))
+                p = safe_snprintf(p, end, ",\"track\":%.1f", a->track);
+            if (trackDataValid(&a->track_rate_valid))
+                p = safe_snprintf(p, end, ",\"track_rate\":%.2f", a->track_rate);
+            if (trackDataValid(&a->roll_valid))
+                p = safe_snprintf(p, end, ",\"roll\":%.1f", a->roll);
+            if (trackDataValid(&a->mag_heading_valid))
+                p = safe_snprintf(p, end, ",\"mag_heading\":%.1f", a->mag_heading);
+            if (trackDataValid(&a->true_heading_valid))
+                p = safe_snprintf(p, end, ",\"true_heading\":%.1f", a->true_heading);
+            if (trackDataValid(&a->baro_rate_valid))
+                p = safe_snprintf(p, end, ",\"baro_rate\":%d", a->baro_rate);
+            if (trackDataValid(&a->geom_rate_valid))
+                p = safe_snprintf(p, end, ",\"geom_rate\":%d", a->geom_rate);
+            if (trackDataValid(&a->squawk_valid))
+                p = safe_snprintf(p, end, ",\"squawk\":\"%04x\"", a->squawk);
+            if (trackDataValid(&a->emergency_valid))
+                p = safe_snprintf(p, end, ",\"emergency\":\"%s\"", emergency_enum_string(a->emergency));
+            if (a->category != 0)
+                p = safe_snprintf(p, end, ",\"category\":\"%02X\"", a->category);
+            if (trackDataValid(&a->nav_qnh_valid))
+                p = safe_snprintf(p, end, ",\"nav_qnh\":%.1f", a->nav_qnh);
+            if (trackDataValid(&a->nav_altitude_mcp_valid))
+                p = safe_snprintf(p, end, ",\"nav_altitude_mcp\":%d", a->nav_altitude_mcp);
+            if (trackDataValid(&a->nav_altitude_fms_valid))
+                p = safe_snprintf(p, end, ",\"nav_altitude_fms\":%d", a->nav_altitude_fms);
+            if (trackDataValid(&a->nav_heading_valid))
+                p = safe_snprintf(p, end, ",\"nav_heading\":%.1f", a->nav_heading);
+            if (trackDataValid(&a->nav_modes_valid)) {
+                p = safe_snprintf(p, end, ",\"nav_modes\":[");
+                p = append_nav_modes(p, end, a->nav_modes, "\"", ",");
+                p = safe_snprintf(p, end, "]");
+            }
+            if (trackDataValid(&a->position_valid))
+                p = safe_snprintf(p, end, ",\"lat\":%f,\"lon\":%f,\"nic\":%u,\"rc\":%u,\"seen_pos\":%.1f", a->lat, a->lon, a->pos_nic, a->pos_rc, (now - a->position_valid.updated) / 1000.0);
+            if (a->adsb_version >= 0)
+                p = safe_snprintf(p, end, ",\"version\":%d", a->adsb_version);
+            if (trackDataValid(&a->nic_baro_valid))
+                p = safe_snprintf(p, end, ",\"nic_baro\":%u", a->nic_baro);
+            if (trackDataValid(&a->nac_p_valid))
+                p = safe_snprintf(p, end, ",\"nac_p\":%u", a->nac_p);
+            if (trackDataValid(&a->nac_v_valid))
+                p = safe_snprintf(p, end, ",\"nac_v\":%u", a->nac_v);
+            if (trackDataValid(&a->sil_valid))
+                p = safe_snprintf(p, end, ",\"sil\":%u", a->sil);
+            if (a->sil_type != SIL_INVALID)
+                p = safe_snprintf(p, end, ",\"sil_type\":\"%s\"", sil_type_enum_string(a->sil_type));
+            if (trackDataValid(&a->gva_valid))
+                p = safe_snprintf(p, end, ",\"gva\":%u", a->gva);
+            if (trackDataValid(&a->sda_valid))
+                p = safe_snprintf(p, end, ",\"sda\":%u", a->sda);
+            if (trackDataValid(&a->alert_valid))
+                p = safe_snprintf(p, end, ",\"alert\":%u", a->alert);
+            if (trackDataValid(&a->spi_valid))
+                p = safe_snprintf(p, end, ",\"spi\":%u", a->spi);
+
+            p = safe_snprintf(p, end, ",\"mlat\":");
+            p = append_flags(p, end, a, SOURCE_MLAT);
+            p = safe_snprintf(p, end, ",\"tisb\":");
+            p = append_flags(p, end, a, SOURCE_TISB);
+
+            p = safe_snprintf(p, end, ",\"messages\":%ld,\"seen\":%.1f,\"rssi\":%.1f}",
+                    a->messages, (now - a->seen) / 1000.0,
+                    10 * log10((a->signalLevel[0] + a->signalLevel[1] + a->signalLevel[2] + a->signalLevel[3] +
+                            a->signalLevel[4] + a->signalLevel[5] + a->signalLevel[6] + a->signalLevel[7] + 1e-5) / 8));
+
+            if ((p + 10) >= end) { // +10 to leave some space for the final line
+                // overran the buffer
+                int used = line_start - buf;
+                buflen *= 2;
+                buf = (char *) realloc(buf, buflen);
+                p = buf + used;
+                end = buf + buflen;
+                goto retry;
+            }
+        }
+    }
+
+    p = safe_snprintf(p, end, "\n  ]\n}\n");
+    *len = p - buf;
+    return buf;
 }
 
 //
