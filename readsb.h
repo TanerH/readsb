@@ -279,7 +279,6 @@ typedef enum {
 #include "demod_2400.h"
 #include "stats.h"
 #include "cpr.h"
-#include "icao_filter.h"
 #include "convert.h"
 #include "sdr.h"
 
