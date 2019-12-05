@@ -389,7 +389,7 @@ static void backgroundTasks(void) {
     if (Modes.json_dir && now >= next_json) {
         writeJsonToFile("aircraft.json", generateAircraftJson);
         next_json = now + Modes.json_interval;
-        //writeJsonToFile("vrs.json", generateVRS);
+        writeJsonToFile("vrs.json", generateVRS);
     }
 	if (now >= next_tcp_json) {
         writeJsonToNet(&Modes.vrs_out, generateVRS);
