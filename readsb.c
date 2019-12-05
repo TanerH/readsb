@@ -171,7 +171,7 @@ static void modesInitConfig(void) {
     Modes.mode_ac_auto = 1;
     Modes.nfix_crc = 1;
     Modes.biastee = 0;
-    Modes.filter_persistence = 2;
+    Modes.filter_persistence = 1;
 
     sdrInitConfig();
 }
