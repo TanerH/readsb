@@ -320,6 +320,7 @@ static void backgroundTasks(void) {
     static uint64_t next_stats_display;
     static uint64_t next_stats_update;
     static uint64_t next_json, next_history;
+    static uint64_t next_tcp_json;
 
     uint64_t now = mstime();
 
@@ -389,8 +390,11 @@ static void backgroundTasks(void) {
         writeJsonToFile("aircraft.json", generateAircraftJson);
         next_json = now + Modes.json_interval;
         //writeJsonToFile("vrs.json", generateVRS);
-        //writeJsonToNet(&Modes.vrs_out, generateVRS);
     }
+	if (now >= next_tcp_json) {
+        writeJsonToNet(&Modes.vrs_out, generateVRS);
+        next_tcp_json = now + 2000;
+	}
 
 	// disable history
     if (0 && now >= next_history) {
