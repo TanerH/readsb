@@ -417,26 +417,55 @@ static void modesCloseClient(struct client *c) {
 //
 // Send the write buffer for the specified writer to all connected clients
 //
-static void flushWrites(struct net_writer *writer) {
+static int flushWrites(struct net_writer *writer) {
     struct client *c;
 
     for (c = Modes.clients; c; c = c->next) {
         if (!c->service)
             continue;
         if (c->service->writer == writer->service->writer) {
+            int error_count = 0;
+            int total_nwritten = 0;
+            int done = 0;
+            int towrite = writer->dataUsed;
+            char *pdata = writer->data;
+            do {
 #ifndef _WIN32
-            int nwritten = write(c->fd, writer->data, writer->dataUsed);
+                int nwritten = write(c->fd, pdata, towrite);
+                int err = errno;
 #else
-            int nwritten = send(c->fd, writer->data, writer->dataUsed, 0);
+                int nwritten = send(c->fd, pdata, towrite, 0);
+                int err = WSAGetLastError();
 #endif
-            if (nwritten != writer->dataUsed) {
-                modesCloseClient(c);
-            }
+                // If we get -1, it's only fatal if it's not EAGAIN/EWOULDBLOCK
+                if (nwritten < 0 && err != EAGAIN && err != EWOULDBLOCK) {
+                    modesCloseClient(c);
+                    fprintf(stderr, "flushWrite: write error %d (%s)\n", errno, strerror(errno));
+                    done = 1;
+                }
+
+                if (nwritten > 0) {
+                    // We've written something, add it to the total
+                    total_nwritten += nwritten;
+                    // Advance buffer
+                    pdata += nwritten;
+                    towrite -= nwritten;
+                }
+
+                if (nwritten < 0) {
+                    if (error_count++ > 500) {
+                        fprintf(stderr, "flushWrite: write error %d (%s)\n", errno, strerror(errno));
+                        return 0;
+                    }
+                }
+            } while (!done && total_nwritten < writer->dataUsed);
+
         }
     }
 
     writer->dataUsed = 0;
     writer->lastWrite = mstime();
+    return 1;
 }
 
 // Prepare to write up to 'len' bytes to the given net_writer.
@@ -453,7 +482,9 @@ static void *prepareWrite(struct net_writer *writer, int len) {
 
     if (writer->dataUsed + len >= MODES_OUT_BUF_SIZE) {
         // Flush now to free some space
-        flushWrites(writer);
+        if (!flushWrites(writer)) {
+            return NULL;
+        }
     }
 
     return writer->data + writer->dataUsed;
@@ -2586,8 +2617,9 @@ void writeJsonToNet(struct net_writer *writer, char * (*generator) (const char *
     int bytes = MODES_OUT_BUF_SIZE - 256;
 
     char *p = prepareWrite(writer, bytes);
-    if (!p)
+    if (!p) {
         return;
+    }
 
     content = generator(NULL, &len);
     pos = content;
@@ -2603,6 +2635,9 @@ void writeJsonToNet(struct net_writer *writer, char * (*generator) (const char *
         completeWrite(writer, p);
 
         p = prepareWrite(writer, bytes);
+    }
+    if (!p) {
+        fprintf(stderr, "writeJsonToNet: write error\n");
     }
 
     flushWrites(writer);
